@@ -1,16 +1,19 @@
 FROM alpine/git:latest AS source
 
-WORKDIR /repo
-COPY . .
+RUN apk add --no-cache git-lfs
+RUN git lfs install
 
-RUN apk add --no-cache git-lfs && \
-    git lfs install && \
+WORKDIR /repo
+
+RUN git clone --depth 1 https://github.com/mallowstudio/marble.git . && \
     git lfs pull
 
 FROM node:22-alpine
 
 WORKDIR /app
 COPY --from=source /repo/ .
+
+RUN rm -rf .git
 
 ENV NODE_ENV=production
 
