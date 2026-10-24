@@ -1,8 +1,10 @@
-﻿const http = require("http");
+// Unified test portal server. Based on the marble-repo server.js (same MIME types and headers);
+// serves public/ with "/" = selector, "/marble/" and "/pinball/" = the two independent Unity WebGL builds.
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const root = __dirname;
+const root = path.join(__dirname, "public");
 const port = process.env.PORT || 3000;
 
 const mimeTypes = {
@@ -16,20 +18,28 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
-  ".json": "application/json; charset=utf-8"
+  ".json": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8"
 };
 
 const server = http.createServer((req, res) => {
-  let pathname;
+  let url, pathname;
 
   try {
-    pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+    url = new URL(req.url, "http://localhost");
+    pathname = decodeURIComponent(url.pathname);
   } catch {
     res.writeHead(400);
     return res.end("Bad Request");
   }
 
-  if (pathname === "/") pathname = "/index.html";
+  // Unity builds load their files relative to index.html, so a game page must be served with a trailing slash.
+  if (pathname === "/marble" || pathname === "/pinball") {
+    res.writeHead(301, { Location: pathname + "/" + url.search });
+    return res.end();
+  }
+
+  if (pathname.endsWith("/")) pathname += "index.html";
 
   const filePath = path.resolve(root, "." + pathname);
   const relative = path.relative(root, filePath);
@@ -59,6 +69,14 @@ const server = http.createServer((req, res) => {
 
     res.setHeader("X-Content-Type-Options", "nosniff");
 
+    // Pages are revalidated so a redeploy is picked up; build files keep the default heuristic caching.
+    if (ext === ".html") res.setHeader("Cache-Control", "no-cache");
+
+    if (req.method === "HEAD") {
+      res.setHeader("Content-Length", stat.size);
+      return res.end();
+    }
+
     fs.createReadStream(filePath)
       .on("error", () => {
         if (!res.headersSent) res.writeHead(500);
@@ -69,5 +87,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, "0.0.0.0", () => {
-  console.log(`Marble WebGL server listening on ${port}`);
+  console.log(`Games test portal listening on ${port}`);
 });

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Games Test Portal</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; --bg: #0b0d12; --card: #151922; --card-hi: #1c2230; --line: rgba(255,255,255,.10); --text: #eef1f7; --muted: #9aa3b5; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(1200px 600px at 50% -10%, #1a2133 0%, var(--bg) 60%) fixed, var(--bg);
+      color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; padding: 40px 16px;
+    }
+    header { text-align: center; margin-bottom: 40px; }
+    .tag { display: inline-block; font-size: 12px; letter-spacing: .18em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+    h1 { margin: 16px 0 8px; font-size: clamp(28px, 4vw, 40px); letter-spacing: .04em; }
+    header p { margin: 0; color: var(--muted); }
+    main { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 28px; width: 100%; justify-content: center; }
+    a.card {
+      display: flex; flex-direction: column; justify-content: flex-end; min-height: 280px; padding: 28px;
+      border-radius: 18px; border: 1px solid var(--line); text-decoration: none; color: inherit;
+      background: var(--card); position: relative; overflow: hidden; transition: border-color .15s, background .15s;
+    }
+    a.card::before { content: ""; position: absolute; inset: 0; opacity: .55; pointer-events: none; }
+    a.card.marble::before { background: radial-gradient(260px 200px at 75% 25%, rgba(64,156,255,.45), transparent 70%); }
+    a.card.pinball::before { background: radial-gradient(260px 200px at 75% 25%, rgba(255,92,64,.45), transparent 70%); }
+    a.card:hover, a.card:focus-visible { background: var(--card-hi); border-color: rgba(255,255,255,.35); outline: none; }
+    .num { position: absolute; top: 24px; left: 28px; font-size: 12px; letter-spacing: .18em; color: var(--muted); }
+    .card h2 { position: relative; margin: 0 0 8px; font-size: 30px; letter-spacing: .06em; }
+    .card p { position: relative; margin: 0 0 20px; color: var(--muted); line-height: 1.45; }
+    .play { position: relative; align-self: flex-start; font-weight: 600; font-size: 14px; letter-spacing: .1em; padding: 10px 18px; border-radius: 10px; background: var(--text); color: var(--bg); }
+    footer { margin-top: 40px; color: var(--muted); font-size: 13px; text-align: center; }
+    @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); } a.card { min-height: 220px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="tag">TEST BUILD</span>
+    <h1>Choose a game</h1>
+    <p>Each game loads on its own page.</p>
+  </header>
+  <main>
+    <a class="card marble" href="/marble/">
+      <span class="num">GAME 1</span>
+      <h2>MARBLE RACE</h2>
+      <p>Marble race elimination.</p>
+      <span class="play">PLAY &rarr;</span>
+    </a>
+    <a class="card pinball" href="/pinball/">
+      <span class="num">GAME 2</span>
+      <h2>PINBALL</h2>
+      <p>100-ball pinball elimination. Skull Arena or Reactor, picked at random.</p>
+      <span class="play">PLAY &rarr;</span>
+    </a>
+  </main>
+  <footer>Desktop browser recommended. Larger downloads start only after you pick a game.</footer>
+</body>
+</html>
