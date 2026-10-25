@@ -3,28 +3,30 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Unity Web Player | Pinball</title>
-    <link rel="shortcut icon" href="TemplateData/favicon.ico">
+    <title>Pinball</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="TemplateData/style.css">
+    <!-- Portal: no visible loader. The page stays plain dark until the game itself is on screen. -->
+    <style>
+      html, body { background: #0b0d12 }
+      #unity-canvas, #unity-footer { visibility: hidden; opacity: 0 }
+      #unity-canvas.unity-ready, #unity-footer.unity-ready { visibility: visible; opacity: 1; transition: opacity .25s ease-out }
+      #unity-build-title { color: #9aa3b5 }
+      #unity-load-error { display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #eef1f7; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; text-align: center }
+    </style>
   </head>
   <body>
     <!-- Test portal: link back to the game selector (outside the Unity canvas). -->
     <a id="portal-back" href="/" style="position:fixed;top:12px;left:12px;z-index:10;padding:6px 12px;border-radius:6px;background:rgba(16,18,24,.85);color:#e8ecf4;font:600 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;letter-spacing:.06em;text-decoration:none;border:1px solid rgba(255,255,255,.18)">&larr; GAMES</a>
     <div id="unity-container" class="unity-desktop">
       <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
-      <div id="unity-loading-bar">
-        <div id="unity-logo"></div>
-        <div id="unity-progress-bar-empty">
-          <div id="unity-progress-bar-full"></div>
-        </div>
-      </div>
       <div id="unity-warning"> </div>
       <div id="unity-footer">
-        <div id="unity-logo-title-footer"></div>
         <div id="unity-fullscreen-button"></div>
         <div id="unity-build-title">Pinball</div>
       </div>
     </div>
+    <div id="unity-load-error">The game could not be loaded.<br>Please reload the page.</div>
     <script>
       var canvas = document.querySelector("#unity-canvas");
 
@@ -110,23 +112,73 @@
         canvas.style.height = "600px";
       }
 
-      document.querySelector("#unity-loading-bar").style.display = "block";
+      // Portal: reveal the canvas only once the game itself is drawing. The build still plays Unity's start-up splash
+      // inside the canvas after createUnityInstance resolves; the splash draws only a few quads per frame, the first
+      // real scene draws many more. Draw calls on this canvas's WebGL context are counted until then.
+      var gameReveal = (function () {
+        var footer = document.querySelector("#unity-footer");
+        var drawFns = ["drawElements", "drawArrays", "drawElementsInstanced", "drawArraysInstanced", "drawRangeElements"];
+        var gl = null, draws = 0, done = false;
+        canvas.getContext = function (type, attrs) {
+          var ctx = HTMLCanvasElement.prototype.getContext.call(this, type, attrs);
+          if (ctx && !gl && /webgl/.test(type)) {
+            gl = ctx;
+            drawFns.forEach(function (fn) {
+              var f = ctx[fn];
+              if (f) ctx[fn] = function () { draws++; return f.apply(this, arguments); };
+            });
+          }
+          return ctx;
+        };
+        function show() {
+          if (done) return;
+          done = true;
+          canvas.classList.add("unity-ready");
+          footer.classList.add("unity-ready");
+          if (gl) drawFns.forEach(function (fn) { delete gl[fn]; });
+          delete canvas.getContext;
+        }
+        // Called when createUnityInstance resolves.
+        function watch() {
+          if (!gl) { setTimeout(show, 4000); return; }
+          setTimeout(show, 12000);                  // never stay hidden on an unexpected frame pattern
+          var splashSeen = false, sceneFrames = 0;
+          var tick = function () {
+            if (done) return;
+            var n = draws;
+            draws = 0;
+            if (n > 0 && n <= 4) { splashSeen = true; sceneFrames = 0; }
+            else if (n >= 8 && ++sceneFrames === 3) {
+              // The splash fades out over the first scene frames (~0.5 s); without a splash there is nothing to wait for.
+              setTimeout(show, splashSeen ? 650 : 0);
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }
+        return { watch: watch, show: show };
+      })();
+
+      function unityLoadFailed(message) {
+        console.error(message);
+        gameReveal.show();
+        canvas.style.display = "none";
+        document.querySelector("#unity-footer").style.display = "none";
+        document.querySelector("#unity-load-error").style.display = "block";
+      }
 
       var script = document.createElement("script");
       script.src = loaderUrl;
+      script.onerror = () => unityLoadFailed("Could not load " + loaderUrl);
       script.onload = () => {
-        createUnityInstance(canvas, config, (progress) => {
-          document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
-              }).then((unityInstance) => {
-                document.querySelector("#unity-loading-bar").style.display = "none";
-                document.querySelector("#unity-fullscreen-button").onclick = () => {
-                  unityInstance.SetFullscreen(1);
-                };
-
-              }).catch((message) => {
-                alert(message);
-              });
-            };
+        createUnityInstance(canvas, config).then((unityInstance) => {
+          gameReveal.watch();
+          document.querySelector("#unity-fullscreen-button").onclick = () => {
+            unityInstance.SetFullscreen(1);
+          };
+        }).catch(unityLoadFailed);
+      };
 
       document.body.appendChild(script);
 
