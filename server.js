@@ -4,6 +4,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
 
 const root = path.join(__dirname, "public");
 const port = process.env.PORT || 3000;
@@ -77,14 +78,19 @@ const server = http.createServer((req, res) => {
 
     // Build files keep the same names across deploys, so every load revalidates them against a
     // content-hash ETag: unchanged bytes get a 304, changed bytes get a new ETag and a full 200.
-    contentEtag(filePath, stat).then((etag) => {
+    // A verified pre-compressed <file>.br is served instead to clients that accept Brotli.
+    Promise.all([contentEtag(filePath, stat), brotliVariant(filePath)]).then(([etag, br]) => {
+      const variant = br && acceptsBrotli(req.headers["accept-encoding"]) ? br : null;
       res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("ETag", etag);
-      if (etagMatches(req.headers["if-none-match"], etag)) {
+      res.setHeader("Vary", "Accept-Encoding");
+      res.setHeader("ETag", variant ? variant.etag : etag);
+      if (variant) res.setHeader("Content-Encoding", "br");
+      if (etagMatches(req.headers["if-none-match"], variant ? variant.etag : etag)) {
         res.writeHead(304);
         return res.end();
       }
-      sendFile(req, res, filePath, stat);
+      if (variant) sendFile(req, res, variant.path, variant.stat);
+      else sendFile(req, res, filePath, stat);
     }, () => {
       res.writeHead(500);
       res.end();
@@ -132,6 +138,58 @@ function contentEtag(filePath, stat) {
   return etag;
 }
 
+// <file>.br is used only after its decompressed bytes are verified to hash to the original file,
+// so a stale .br left beside a newer payload falls back to the original. Its ETag is the SHA-1 of
+// the compressed bytes, distinct from the original's. Cached per path until either file changes.
+const brVariants = new Map();
+
+function brotliVariant(filePath) {
+  const brPath = filePath + ".br";
+  return Promise.all([fs.promises.stat(filePath), fs.promises.stat(brPath).catch(() => null)]).then(([stat, brStat]) => {
+    if (!brStat || !brStat.isFile()) return null;
+    const key = [stat.size, stat.mtimeMs, brStat.size, brStat.mtimeMs].join(":");
+    const cached = brVariants.get(filePath);
+    if (cached && cached.key === key) return cached.variant;
+
+    const variant = Promise.all([contentEtag(filePath, stat), hashBrotli(brPath)]).then(([etag, hashes]) => {
+      if (hashes.decoded !== etag) {
+        console.warn(`Ignoring ${brPath}: it does not decompress to ${path.basename(filePath)}`);
+        return null;
+      }
+      return { path: brPath, stat: brStat, etag: '"br-' + hashes.encoded + '"' };
+    });
+    brVariants.set(filePath, { key, variant });
+    variant.catch(() => brVariants.delete(filePath));
+    return variant;
+  });
+}
+
+// SHA-1 of the compressed bytes and of their decompressed output, in the same quoted form as contentEtag.
+function hashBrotli(brPath) {
+  return new Promise((resolve, reject) => {
+    const encoded = crypto.createHash("sha1");
+    const decoded = crypto.createHash("sha1");
+    const unzip = zlib.createBrotliDecompress()
+      .on("error", reject)
+      .on("data", (chunk) => decoded.update(chunk))
+      .on("end", () => resolve({ encoded: encoded.digest("base64url"), decoded: '"' + decoded.digest("base64url") + '"' }));
+    fs.createReadStream(brPath)
+      .on("error", reject)
+      .on("data", (chunk) => encoded.update(chunk))
+      .pipe(unzip);
+  });
+}
+
+function acceptsBrotli(header) {
+  if (!header) return false;
+  return header.split(",").some((part) => {
+    const [coding, ...params] = part.trim().split(";");
+    if (coding.trim().toLowerCase() !== "br") return false;
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+    return !q || parseFloat(q.slice(2)) > 0;
+  });
+}
+
 function etagMatches(header, etag) {
   if (!header) return false;
   return header.split(",").some((tag) => {
@@ -142,4 +200,21 @@ function etagMatches(header, etag) {
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`Games test portal listening on ${port}`);
+  warmBuildCache();
 });
+
+// Hash and verify every Build file up front so the first visitors do not wait for it.
+function warmBuildCache() {
+  for (const game of fs.readdirSync(root)) {
+    const dir = path.join(root, game, "Build");
+    if (!fs.existsSync(dir)) continue;
+    for (const name of fs.readdirSync(dir)) {
+      if (name.endsWith(".br")) continue;
+      const filePath = path.join(dir, name);
+      fs.promises.stat(filePath)
+        .then((stat) => Promise.all([contentEtag(filePath, stat), brotliVariant(filePath)]))
+        .then(([, br]) => console.log(`${game}/Build/${name}: ${br ? "brotli verified" : "identity only"}`))
+        .catch((err) => console.warn(`${game}/Build/${name}: ${err.message}`));
+    }
+  }
+}
