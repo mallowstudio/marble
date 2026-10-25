@@ -6,13 +6,24 @@
     <title>Pinball</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="TemplateData/style.css">
-    <!-- Portal: no visible loader. The page stays plain dark until the game itself is on screen. -->
+    <!-- Portal: an HTML/CSS loading screen covers the page until the game itself is on screen; Unity's own loader,
+         logo and start-up splash are never shown. -->
     <style>
       html, body { background: #0b0d12 }
       #unity-canvas, #unity-footer { visibility: hidden; opacity: 0 }
-      #unity-canvas.unity-ready, #unity-footer.unity-ready { visibility: visible; opacity: 1; transition: opacity .25s ease-out }
+      #unity-canvas.unity-ready, #unity-footer.unity-ready { visibility: visible; opacity: 1; transition: opacity .2s ease-out .1s }
       #unity-build-title { color: #9aa3b5 }
-      #unity-load-error { display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #eef1f7; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; text-align: center }
+      #game-loader { --accent: 255, 92, 64; position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: radial-gradient(1200px 600px at 50% -10%, #1a2133 0%, #0b0d12 60%) fixed, #0b0d12; color: #eef1f7; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; transition: opacity .15s ease-out }
+      #game-loader.done { opacity: 0; pointer-events: none }
+      #game-loader-title { margin: 0; font-size: clamp(28px, 6vw, 46px); font-weight: 700; letter-spacing: .18em; padding-left: .18em; text-shadow: 0 0 28px rgba(var(--accent), .35) }
+      #game-loader-bar { position: relative; width: min(240px, 60vw); height: 2px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, .10) }
+      #game-loader-bar::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%; border-radius: 2px; background: linear-gradient(90deg, transparent, rgba(var(--accent), .95), transparent); animation: game-loader-slide 1.6s cubic-bezier(.45, 0, .55, 1) infinite }
+      @keyframes game-loader-slide { from { transform: translateX(-70%) } to { transform: translateX(250%) } }
+      @media (prefers-reduced-motion: reduce) { #game-loader-bar::after { animation-duration: 3.2s } }
+      #game-loader-label { font-size: 12px; font-weight: 600; letter-spacing: .32em; padding-left: .32em; color: #9aa3b5 }
+      #unity-load-error { display: none; font-size: 15px; line-height: 1.5; text-align: center }
+      #game-loader.failed #game-loader-bar, #game-loader.failed #game-loader-label { display: none }
+      #game-loader.failed #unity-load-error { display: block }
     </style>
   </head>
   <body>
@@ -26,7 +37,12 @@
         <div id="unity-build-title">Pinball</div>
       </div>
     </div>
-    <div id="unity-load-error">The game could not be loaded.<br>Please reload the page.</div>
+    <div id="game-loader" role="status" aria-live="polite">
+      <h1 id="game-loader-title">PINBALL</h1>
+      <div id="game-loader-bar"></div>
+      <div id="game-loader-label">LOADING</div>
+      <div id="unity-load-error">The game could not be loaded.<br>Please reload the page.</div>
+    </div>
     <script>
       var canvas = document.querySelector("#unity-canvas");
 
@@ -117,6 +133,7 @@
       // real scene draws many more. Draw calls on this canvas's WebGL context are counted until then.
       var gameReveal = (function () {
         var footer = document.querySelector("#unity-footer");
+        var loader = document.querySelector("#game-loader");
         var drawFns = ["drawElements", "drawArrays", "drawElementsInstanced", "drawArraysInstanced", "drawRangeElements"];
         var gl = null, draws = 0, done = false;
         canvas.getContext = function (type, attrs) {
@@ -130,13 +147,24 @@
           }
           return ctx;
         };
-        function show() {
-          if (done) return;
+        function finish() {
+          if (done) return false;
           done = true;
-          canvas.classList.add("unity-ready");
-          footer.classList.add("unity-ready");
           if (gl) drawFns.forEach(function (fn) { delete gl[fn]; });
           delete canvas.getContext;
+          return true;
+        }
+        // The loading screen fades out while the canvas fades in, then leaves the page.
+        function show() {
+          if (!finish()) return;
+          canvas.classList.add("unity-ready");
+          footer.classList.add("unity-ready");
+          loader.classList.add("done");
+          setTimeout(function () { loader.style.display = "none"; }, 300);
+        }
+        function fail() {
+          finish();
+          loader.classList.add("failed");
         }
         // Called when createUnityInstance resolves.
         function watch() {
@@ -157,15 +185,12 @@
           };
           requestAnimationFrame(tick);
         }
-        return { watch: watch, show: show };
+        return { watch: watch, show: show, fail: fail };
       })();
 
       function unityLoadFailed(message) {
         console.error(message);
-        gameReveal.show();
-        canvas.style.display = "none";
-        document.querySelector("#unity-footer").style.display = "none";
-        document.querySelector("#unity-load-error").style.display = "block";
+        gameReveal.fail();
       }
 
       var script = document.createElement("script");
