@@ -3,6 +3,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const root = path.join(__dirname, "public");
 const port = process.env.PORT || 3000;
@@ -69,22 +70,75 @@ const server = http.createServer((req, res) => {
 
     res.setHeader("X-Content-Type-Options", "nosniff");
 
-    // Pages are revalidated so a redeploy is picked up; build files keep the default heuristic caching.
+    // Pages are revalidated so a redeploy is picked up.
     if (ext === ".html") res.setHeader("Cache-Control", "no-cache");
 
-    if (req.method === "HEAD") {
-      res.setHeader("Content-Length", stat.size);
-      return res.end();
-    }
+    if (!isBuildFile(relative)) return sendFile(req, res, filePath, stat);
 
-    fs.createReadStream(filePath)
-      .on("error", () => {
-        if (!res.headersSent) res.writeHead(500);
-        res.end();
-      })
-      .pipe(res);
+    // Build files keep the same names across deploys, so every load revalidates them against a
+    // content-hash ETag: unchanged bytes get a 304, changed bytes get a new ETag and a full 200.
+    contentEtag(filePath, stat).then((etag) => {
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("ETag", etag);
+      if (etagMatches(req.headers["if-none-match"], etag)) {
+        res.writeHead(304);
+        return res.end();
+      }
+      sendFile(req, res, filePath, stat);
+    }, () => {
+      res.writeHead(500);
+      res.end();
+    });
   });
 });
+
+function sendFile(req, res, filePath, stat) {
+  if (req.method === "HEAD") {
+    res.setHeader("Content-Length", stat.size);
+    return res.end();
+  }
+
+  fs.createReadStream(filePath)
+    .on("error", () => {
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    })
+    .pipe(res);
+}
+
+// public/<game>/Build/<file>
+function isBuildFile(relative) {
+  const parts = relative.split(path.sep);
+  return parts.length === 3 && parts[1] === "Build";
+}
+
+// Strong ETag = SHA-1 of the file contents, cached per path until its size or mtime changes.
+const etags = new Map();
+
+function contentEtag(filePath, stat) {
+  const key = stat.size + ":" + stat.mtimeMs;
+  const cached = etags.get(filePath);
+  if (cached && cached.key === key) return cached.etag;
+
+  const etag = new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha1");
+    fs.createReadStream(filePath)
+      .on("error", reject)
+      .on("data", (chunk) => hash.update(chunk))
+      .on("end", () => resolve('"' + hash.digest("base64url") + '"'));
+  });
+  etags.set(filePath, { key, etag });
+  etag.catch(() => etags.delete(filePath));
+  return etag;
+}
+
+function etagMatches(header, etag) {
+  if (!header) return false;
+  return header.split(",").some((tag) => {
+    tag = tag.trim();
+    return tag === "*" || tag.replace(/^W\//, "") === etag;
+  });
+}
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`Games test portal listening on ${port}`);
